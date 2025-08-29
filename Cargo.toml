@@ -14,3 +14,8 @@ serde_json = "1.0.143"
 safetensors = "0.6.2"
 indicatif = "0.18.0"
 
+gtk4 = { version = "0.10.0", package = "gtk4", features = ["v4_14"] }
+gio = "0.21.1"
+glib = "0.21.1"
+
+cairo-rs = "0.21"          # cairo-rs, matches glib 0.21.x

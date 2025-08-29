@@ -24,6 +24,11 @@ fn main() {
       // Not implemented yet
       unimplemented!("infer is not implemented yet");
     }
+
+    Commands::GUI { model } => {
+      // Create a GUI window
+      neural_net::gui::window::create_window(model);
+    }
   }
 }
 
@@ -48,5 +53,11 @@ enum Commands {
     /// Input image or model path (placeholder)
     #[arg(short, long)]
     input: Option<String>,
+  },
+
+  /// Create a GUI window
+  GUI {
+    #[arg(short, long, default_value = "model.safetensors")]
+    model: String,
   },
 }

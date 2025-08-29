@@ -1,44 +1,18 @@
+use crate::inferrable_model::InferrableModel;
+use crate::serialization::save_safetensors;
 use crate::stats::{RollingMean, TrainingStats};
-use crate::{serialization::save_safetensors, stats};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use mnist::*;
 use ndarray::{Array2, Axis};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use serde::{Deserialize, Serialize};
 
-// sigmoid "clamps" values (in a fairly scaled way) to 0..1
-fn sigmoid(x: &Array2<f32>) -> Array2<f32> {
-  return x.mapv(|v| 1.0 / (1.0 + (-v).exp()));
-}
-
-fn softmax(z: &Array2<f32>) -> Array2<f32> {
-  // Stable softmax: subtract max to avoid large exponents
-  let max = z.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-  let exps = z.mapv(|v| (v - max).exp());
-  let sum = exps.sum();
-  exps.mapv(|e| e / sum)
-}
-
-fn sigmoid_derivative(a: &Array2<f32>) -> Array2<f32> {
-  a.mapv(|v| v * (1.0 - v))
-}
+use crate::math::{sigmoid, sigmoid_derivative, softmax};
 
 const LR: f32 = 0.001;
 pub const TRAINING_SIZE: usize = 50_000;
-const EPOCHS: usize = 5;
+const EPOCHS: usize = 15;
 const ROLLING_MEAN_SIZE: usize = 1000;
 
-#[derive(Serialize, Deserialize)]
-struct SerializableModel {
-  w1: Vec<f32>,
-  w1_shape: (usize, usize),
-  b1: Vec<f32>,
-  b1_shape: (usize, usize),
-  w2: Vec<f32>,
-  w2_shape: (usize, usize),
-  b2: Vec<f32>,
-  b2_shape: (usize, usize),
-}
+mod modname {}
 
 pub fn run_train(mnist: &Mnist, out: &str) {
   let trn_img = Array2::from_shape_vec(
@@ -56,12 +30,15 @@ pub fn run_train(mnist: &Mnist, out: &str) {
 
   // --- Init weights ---
   // 128 hidden layers
-  let mut w1 = Array2::<f32>::random((128, 784), Uniform::new(-0.5, 0.5));
-  let mut b1 = Array2::<f32>::zeros((128, 1));
+  // let mut w1: ndarray::ArrayBase<ndarray::OwnedRepr<f32>, ndarray::Dim<[usize; 2]>> =
+  //   Array2::<f32>::random((128, 784), Uniform::new(-0.5, 0.5));
+  // -  let mut b1 = Array2::<f32>::zeros((128, 1));
+  // -
+  // -  // output layer (10 neurons, 10 digits)
+  // -  let mut w2 = Array2::<f32>::random((10, 128), Uniform::new(-0.5, 0.5));
+  // -  let mut b2 = Array2::<f32>::zeros((10, 1));
 
-  // output layer (10 neurons, 10 digits)
-  let mut w2 = Array2::<f32>::random((10, 128), Uniform::new(-0.5, 0.5));
-  let mut b2 = Array2::<f32>::zeros((10, 1));
+  let mut model = InferrableModel::new();
 
   // training loop
 
@@ -88,7 +65,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
       // 128x784 * 784x1 = 128x1 - hidden layer
       let image = image.insert_axis(Axis(1)); // make it 1x784 ?
       // println!("image shape {:?}", image.dim());
-      let z1 = &w1.dot(&image) + &b1;
+      let z1 = &model.w1.dot(&image) + &model.b1;
       // println!("w1 dot image dim {:?}", &w1.dot(&image).dim());
       // println!("image dim {:?}", image.dim());
       // println!("w1 dim {:?}", w1.dim());
@@ -97,7 +74,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
       let a1 = sigmoid(&z1);
 
       // 10*128 * 128x1 = 10x1; 10x1 + 10x1
-      let z2 = &w2.dot(&a1) + &b2;
+      let z2 = &model.w2.dot(&a1) + &model.b2;
 
       // redistribute so all values sum up to 1
       let a2 = softmax(&z2);
@@ -125,18 +102,17 @@ pub fn run_train(mnist: &Mnist, out: &str) {
 
       // 128x10 * 10x1 = 128x1 * 128x1 (how saturated are these hidden neurons? If saturated they've learned a feature and dz1_x will be close to 0.)
       // derivative should be taken on the activated values (a1)
-      let dz1 = w2.t().dot(&dz2) * sigmoid_derivative(&a1);
+      let dz1 = model.w2.t().dot(&dz2) * sigmoid_derivative(&a1);
 
       // "flash" the image on to the hidden layer by multiplying it
       // 128x1 * 1x784 = 128x784 = one "flashed" (multiplied) hidden layer neuron. We'll back-propagate by this the error amount, except if the neuron is saturated.
       let dw1 = dz1.dot(&image.t());
       let db1 = dz1.clone();
 
-      // Update; comments assume we are confidently wrong
-      w2 = &w2 - &(LR * &dw2);
-      b2 = &b2 - &(LR * &db2);
-      w1 = &w1 - &(LR * &dw1);
-      b1 = &b1 - &(LR * &db1);
+      model.w2 = &model.w2 - &(LR * &dw2);
+      model.b2 = &model.b2 - &(LR * &db2);
+      model.w1 = &model.w1 - &(LR * &dw1);
+      model.b1 = &model.b1 - &(LR * &db1);
 
       rolling_entropy_loss.push(entropy_loss);
       stats.update(entropy_loss, is_correct);
@@ -157,22 +133,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
 
   println!("\nTraining finished, saving model to {}", out);
 
-  let (w1_r, w1_c) = w1.dim();
-  let (b1_r, b1_c) = b1.dim();
-  let (w2_r, w2_c) = w2.dim();
-  let (b2_r, b2_c) = b2.dim();
-
-  let model = SerializableModel {
-    w1: w1.iter().cloned().collect(),
-    w1_shape: (w1_r, w1_c),
-    b1: b1.iter().cloned().collect(),
-    b1_shape: (b1_r, b1_c),
-    w2: w2.iter().cloned().collect(),
-    w2_shape: (w2_r, w2_c),
-    b2: b2.iter().cloned().collect(),
-    b2_shape: (b2_r, b2_c),
-  };
-
+  let model = model.to_serializable_model();
   // Check for non-finite values. serde_json serializes NaN/Inf to null,
   // which is why you were seeing nulls in the JSON file.
   let check = |v: &Vec<f32>, name: &str| {
