@@ -2,7 +2,7 @@ use gio::ApplicationFlags;
 use glib::clone::Downgrade;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, Box, Button, Label, Orientation};
-use ndarray::Axis;
+use ndarray::{Array2, Axis};
 use std::rc::Rc;
 
 use crate::inferrable_model::InferrableModel;
@@ -49,27 +49,18 @@ pub fn create_window(model_path: &str) {
       .resizable(true)
       .build();
 
-    // Create the drawing area component
-    let drawing_area_ui = DrawingAreaUI::new();
-
     // Create the main layout - vertical box
+    // Create the drawing area component will be created after the output label so the
+    // callback can capture the label and the model.
+
     let main_vbox = Box::new(Orientation::Vertical, 10);
     main_vbox.set_margin_top(10);
     main_vbox.set_margin_bottom(10);
     main_vbox.set_margin_start(10);
     main_vbox.set_margin_end(10);
 
-    // Create horizontal box for drawing area and neural net output
     let content_hbox = Box::new(Orientation::Horizontal, 20);
 
-    // Add drawing area to the horizontal box
-    {
-      let drawing_area_borrowed = drawing_area_ui.borrow();
-      let drawing_area = drawing_area_borrowed.get_drawing_area();
-      content_hbox.append(drawing_area);
-    }
-
-    // Create placeholder for neural network output
     let output_text = "Neural Network Output:
 
 Model loaded successfully!
@@ -77,6 +68,35 @@ Draw a digit to see prediction...";
     let output_label = Label::new(Some(output_text));
     output_label.set_halign(gtk4::Align::Start);
     output_label.set_valign(gtk4::Align::Start);
+
+    // Create the drawing area component with a required callback that performs
+    // inference and updates the output label. The closure takes ownership of
+    // clones of `model` and `output_label`.
+    let drawing_area_ui = {
+      let model_for_cb = model.clone();
+      let output_label_for_cb = output_label.clone();
+      DrawingAreaUI::new(std::boxed::Box::new(move |image_data_2d: Array2<f32>| {
+        let image = flatten_2d_to_1d(&image_data_2d).insert_axis(Axis(1));
+
+        // Forward pass
+        let z1 = &model_for_cb.w1.dot(&image) + &model_for_cb.b1;
+        let a1 = sigmoid(&z1);
+        let z2 = model_for_cb.w2.dot(&a1) + &model_for_cb.b2;
+        let a2 = softmax(&z2);
+
+        // Format predictions and update label on the main thread
+        let mut s = String::new();
+        s.push_str("Neural Network Output:\n\n");
+        s.push_str("Predictions:\n");
+        for (i, v) in a2.iter().enumerate() {
+          s.push_str(&format!("{}: {:.3}\n", i, v));
+        }
+        output_label_for_cb.set_text(&s);
+      }))
+    };
+
+    content_hbox.append(drawing_area_ui.borrow().get_drawing_area());
+
     content_hbox.append(&output_label);
 
     // Create horizontal box for buttons
@@ -102,8 +122,8 @@ Draw a digit to see prediction...";
         if let (Some(drawing_area_ui), Some(model)) =
           (drawing_area_ui_weak.upgrade(), model.upgrade())
         {
-          let image_data_2d = drawing_area_ui.borrow().get_image_data();
-          let mut image = flatten_2d_to_1d(&image_data_2d).insert_axis(Axis(1));
+          let image_data_2d = drawing_area_ui.borrow_mut().get_image_data();
+          let image = flatten_2d_to_1d(&image_data_2d).insert_axis(Axis(1));
 
           let values: Vec<f64> = image.iter().map(|v| (*v as f64)).collect();
           for r in 0..28 {
