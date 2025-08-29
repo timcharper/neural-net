@@ -1,4 +1,6 @@
-use crate::serialization::save_safetensors;
+use crate::stats::{RollingMean, TrainingStats};
+use crate::{serialization::save_safetensors, stats};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use mnist::*;
 use ndarray::{Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -21,9 +23,9 @@ fn sigmoid_derivative(a: &Array2<f32>) -> Array2<f32> {
   a.mapv(|v| v * (1.0 - v))
 }
 
-const LR: f32 = 0.01;
-pub const TRAINING_SIZE: usize = 20_000;
-const EPOCHS: usize = 1;
+const LR: f32 = 0.001;
+pub const TRAINING_SIZE: usize = 50_000;
+const EPOCHS: usize = 5;
 const ROLLING_MEAN_SIZE: usize = 1000;
 
 #[derive(Serialize, Deserialize)]
@@ -63,9 +65,25 @@ pub fn run_train(mnist: &Mnist, out: &str) {
 
   // training loop
 
+  // MultiProgress will hold one progress bar per epoch
+  let m = MultiProgress::new();
+  let sty =
+    ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+      .unwrap()
+      .progress_chars("##-");
+
   for epoch in 0..EPOCHS {
     println!("Epoch: {}", epoch);
-    for (image, &y) in trn_img.outer_iter().zip(trn_lbl.iter()) {
+    let rolling_entropy_loss = &mut RollingMean::new(ROLLING_MEAN_SIZE);
+
+    let pb = m.add(ProgressBar::new(TRAINING_SIZE as u64));
+    pb.set_style(sty.clone());
+    pb.set_prefix(format!("Epoch {}/{}", epoch + 1, EPOCHS));
+    pb.set_message(format!("loss={:.4}", rolling_entropy_loss.mean()));
+
+    let stats = &mut TrainingStats::new();
+
+    for (i, (image, &y)) in trn_img.outer_iter().zip(trn_lbl.iter()).enumerate() {
       // Forward
       // 128x784 * 784x1 = 128x1 - hidden layer
       let image = image.insert_axis(Axis(1)); // make it 1x784 ?
@@ -83,6 +101,11 @@ pub fn run_train(mnist: &Mnist, out: &str) {
 
       // redistribute so all values sum up to 1
       let a2 = softmax(&z2);
+
+      let correct_probability = a2[[y as usize, 0]];
+      let entropy_loss = -((correct_probability + 1e-10).ln()); // add small value to avoid log(0)
+      let max_probability = a2.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+      let is_correct = correct_probability == max_probability;
 
       // One-hot target (the correct probabilities)
       let mut y_vec = Array2::<f32>::zeros((10, 1));
@@ -114,8 +137,22 @@ pub fn run_train(mnist: &Mnist, out: &str) {
       b2 = &b2 - &(LR * &db2);
       w1 = &w1 - &(LR * &dw1);
       b1 = &b1 - &(LR * &db1);
-      print!(".")
+
+      rolling_entropy_loss.push(entropy_loss);
+      stats.update(entropy_loss, is_correct);
+
+      // update the per-epoch progress bar: show rolling mean and iteration
+      pb.inc(1);
+      pb.set_message(format!(
+        "loss={:.4} it={}/{}",
+        rolling_entropy_loss.mean(),
+        i + 1,
+        TRAINING_SIZE
+      ));
     }
+    println!("Training stats: {:?}", stats.to_string());
+
+    pb.finish_with_message("done");
   }
 
   println!("\nTraining finished, saving model to {}", out);
