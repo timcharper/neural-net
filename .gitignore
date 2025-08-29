@@ -1,3 +1,5 @@
 .Rhistory
 .RData
 target
+*.safetensors
+data/
