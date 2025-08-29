@@ -1,0 +1,5 @@
+# Use spaces instead of hard tabs
+hard_tabs = false
+
+# Number of spaces per indentation level
+tab_spaces = 2
