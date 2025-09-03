@@ -2,19 +2,22 @@ use crate::inferrable_model::InferrableModel;
 use crate::serialization::save_safetensors;
 use crate::stats::{RollingMean, TrainingStats};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use mnist::*;
+use mnist::MnistBuilder;
 use ndarray::{Array2, Axis};
 
 use crate::math::{sigmoid, sigmoid_derivative, softmax};
 
 const LR: f32 = 0.001;
-pub const TRAINING_SIZE: usize = 50_000;
+pub const TRAINING_SIZE: usize = 60_000 /* whole dataset */;
 const EPOCHS: usize = 15;
 const ROLLING_MEAN_SIZE: usize = 1000;
 
-mod modname {}
+pub fn run_train(model_path: &str) {
+  let mnist = MnistBuilder::new()
+    .label_format_digit()
+    .training_set_length(TRAINING_SIZE as u32)
+    .finalize();
 
-pub fn run_train(mnist: &Mnist, out: &str) {
   let trn_img = Array2::from_shape_vec(
     (TRAINING_SIZE, 28 * 28),
     mnist
@@ -131,7 +134,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
     pb.finish_with_message("done");
   }
 
-  println!("\nTraining finished, saving model to {}", out);
+  println!("\nTraining finished, saving model to {}", model_path);
 
   let model = model.to_serializable_model();
   // Check for non-finite values. serde_json serializes NaN/Inf to null,
@@ -173,7 +176,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
     .expect("b2 shape mismatch");
 
   match save_safetensors(
-    out,
+    model_path,
     &[
       ("w1", &arr_w1),
       ("b1", &arr_b1),
@@ -181,7 +184,7 @@ pub fn run_train(mnist: &Mnist, out: &str) {
       ("b2", &arr_b2),
     ],
   ) {
-    Ok(()) => println!("Model saved to {} as safetensors", out),
+    Ok(()) => println!("Model saved to {} as safetensors", model_path),
     Err(e) => eprintln!("Failed to write safetensors: {:?}", e),
   }
 }

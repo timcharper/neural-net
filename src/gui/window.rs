@@ -2,7 +2,7 @@ use gio::ApplicationFlags;
 use glib::clone::Downgrade;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, Box, Button, Label, Orientation};
-use ndarray::{Array2, Axis};
+use ndarray::{Array, Array2, Axis, Ix2};
 use std::rc::Rc;
 
 use crate::inferrable_model::InferrableModel;
@@ -10,6 +10,18 @@ use crate::math::{flatten_2d_to_1d, sigmoid, softmax};
 use crate::serializable_model::SerializableModel;
 
 use super::drawing_area_ui::DrawingAreaUI;
+
+fn run_inference(model: &InferrableModel, image_data: &Array2<u8>) -> Array<f32, Ix2> {
+  let image = flatten_2d_to_1d(image_data)
+    .mapv(|x| x as f32)
+    .insert_axis(Axis(1));
+
+  // Forward pass
+  let z1 = &model.w1.dot(&image) + &model.b1;
+  let a1 = sigmoid(&z1);
+  let z2 = model.w2.dot(&a1) + &model.b2;
+  softmax(&z2)
+}
 
 pub fn create_window(model_path: &str) {
   // Load the neural network model
@@ -75,14 +87,8 @@ Draw a digit to see prediction...";
     let drawing_area_ui = {
       let model_for_cb = model.clone();
       let output_label_for_cb = output_label.clone();
-      DrawingAreaUI::new(std::boxed::Box::new(move |image_data_2d: Array2<f32>| {
-        let image = flatten_2d_to_1d(&image_data_2d).insert_axis(Axis(1));
-
-        // Forward pass
-        let z1 = &model_for_cb.w1.dot(&image) + &model_for_cb.b1;
-        let a1 = sigmoid(&z1);
-        let z2 = model_for_cb.w2.dot(&a1) + &model_for_cb.b2;
-        let a2 = softmax(&z2);
+      DrawingAreaUI::new(std::boxed::Box::new(move |image_data_2d: Array2<u8>| {
+        let a2 = run_inference(&model_for_cb, &image_data_2d);
 
         // Format predictions and update label on the main thread
         let mut s = String::new();
@@ -123,47 +129,18 @@ Draw a digit to see prediction...";
           (drawing_area_ui_weak.upgrade(), model.upgrade())
         {
           let image_data_2d = drawing_area_ui.borrow_mut().get_image_data();
-          let image = flatten_2d_to_1d(&image_data_2d).insert_axis(Axis(1));
 
-          let values: Vec<f64> = image.iter().map(|v| (*v as f64)).collect();
           for r in 0..28 {
             for c in 0..28 {
-              let v = values[r * 28 + c];
-              print!("{:5.2} ", v);
+              let v = image_data_2d[[r, c]];
+              print!("{:4} ", v);
             }
             println!();
           }
 
-          // 784x1 * 128x784 = 128x1
-          let z1 = &model.w1.dot(&image) + &model.b1;
-          let a1 = sigmoid(&z1);
-
-          // apply hidden activations to classification neurons
-          // 128x1 * 10x128 = 10x1
-          let z2 = model.w2.dot(&a1) + &model.b2;
-          let a2 = softmax(&z2);
+          let a2 = run_inference(&model, &image_data_2d);
 
           println!("Predictions: {:?}", a2)
-          /*
-          // Forward
-          // 128x784 * 784x1 = 128x1 - hidden layer
-          let image = image.insert_axis(Axis(1)); // make it 1x784 ?
-          // println!("image shape {:?}", image.dim());
-          let z1 = &model.w1.dot(&image) + &model.b1;
-          // println!("w1 dot image dim {:?}", &w1.dot(&image).dim());
-          // println!("image dim {:?}", image.dim());
-          // println!("w1 dim {:?}", w1.dim());
-          // println!("b1 dim {:?}", b1.dim());
-          // clamp / normalize 128x1
-          let a1 = sigmoid(&z1);
-
-          // 10*128 * 128x1 = 10x1; 10x1 + 10x1
-          let z2 = &model.w2.dot(&a1) + &model.b2;
-
-          // redistribute so all values sum up to 1
-          let a2 = softmax(&z2);
-
-              */
         }
       }
     });

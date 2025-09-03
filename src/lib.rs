@@ -5,4 +5,5 @@ pub mod serializable_model;
 pub mod serialization;
 pub mod stats;
 pub mod training;
+pub mod validate;
 pub use training::{TRAINING_SIZE, run_train};

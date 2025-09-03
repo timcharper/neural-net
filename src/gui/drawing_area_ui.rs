@@ -5,17 +5,16 @@ use ndarray::Array2;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const BRUSH_SIZE: f64 = 30.0;
+const BRUSH_SIZE: f64 = 20.0;
 const CANVAS_SIZE: i32 = 280;
-
 pub struct DrawingAreaUI {
   drawing_area: DrawingArea,
   surface: ImageSurface,
-  on_drawing_updated_cb: Box<dyn Fn(Array2<f32>)>,
+  on_drawing_updated_cb: Box<dyn Fn(Array2<u8>)>,
 }
 
 impl DrawingAreaUI {
-  pub fn new(on_drawing_updated_cb: Box<dyn Fn(Array2<f32>)>) -> Rc<RefCell<Self>> {
+  pub fn new(on_drawing_updated_cb: Box<dyn Fn(Array2<u8>)>) -> Rc<RefCell<Self>> {
     // Create an image surface to store the drawing
     let surface = ImageSurface::create(Format::ARgb32, CANVAS_SIZE, CANVAS_SIZE)
       .expect("Failed to create image surface");
@@ -147,11 +146,11 @@ impl DrawingAreaUI {
   }
 
   /// Convert the drawn image to a 28x28 ndarray by extracting pixel data from the surface
-  pub fn get_image_data(&mut self) -> Array2<f32> {
+  pub fn get_image_data(&mut self) -> Array2<u8> {
     let data = self.surface.data().expect("Failed to get surface data");
 
     // Convert ARGB32 data to grayscale and downsample
-    let mut downsampled = Array2::<f32>::zeros((28, 28));
+    let mut downsampled = Array2::<u8>::zeros((28, 28));
 
     for i in 0..28 {
       for j in 0..28 {
@@ -180,7 +179,11 @@ impl DrawingAreaUI {
           }
         }
 
-        downsampled[[i, j]] = if count > 0 { sum / count as f32 } else { 0.0 };
+        downsampled[[i, j]] = if count > 0 {
+          (sum / count as f32 * 255.0) as u8
+        } else {
+          0
+        };
       }
     }
 

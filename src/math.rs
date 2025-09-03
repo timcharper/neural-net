@@ -22,8 +22,8 @@ pub fn sigmoid_derivative(a: &Array2<f32>) -> Array2<f32> {
 ///
 /// Input: `Array2<f32>` with shape (r, c).
 /// Output: `Array1<f32>` with length r*c, iterating rows then columns.
-pub fn flatten_2d_to_1d(a: &Array2<f32>) -> Array1<f32> {
+pub fn flatten_2d_to_1d<T: Clone>(a: &Array2<T>) -> Array1<T> {
   // Collect into a Vec in row-major order, then convert to Array1
-  let v: Vec<f32> = a.iter().cloned().collect();
+  let v: Vec<T> = a.iter().cloned().collect();
   Array1::from(v)
 }

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use mnist::*;
-use neural_net::{TRAINING_SIZE, run_train};
+use neural_net::{TRAINING_SIZE, training::run_train};
 
 // sigmoid "clamps" values (in a fairly scaled way) to 0..1
 // Training logic moved to `training.rs`
@@ -11,13 +11,7 @@ fn main() {
 
   match &cli.command {
     Commands::Train { out } => {
-      let mnist = MnistBuilder::new()
-        .label_format_digit()
-        .training_set_length(TRAINING_SIZE as u32)
-        .test_set_length(10_000)
-        .finalize();
-
-      run_train(&mnist, out);
+      run_train(out);
     }
 
     Commands::Infer { .. } => {
@@ -28,6 +22,10 @@ fn main() {
     Commands::GUI { model } => {
       // Create a GUI window
       neural_net::gui::window::create_window(model);
+    }
+
+    Commands::Validate { model } => {
+      neural_net::validate::validate(model);
     }
   }
 }
@@ -57,6 +55,12 @@ enum Commands {
 
   /// Create a GUI window
   GUI {
+    #[arg(short, long, default_value = "model.safetensors")]
+    model: String,
+  },
+
+  /// Validate a model
+  Validate {
     #[arg(short, long, default_value = "model.safetensors")]
     model: String,
   },
