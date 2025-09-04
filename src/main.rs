@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
-use mnist::*;
-use neural_net::{TRAINING_SIZE, training::run_train};
+use neural_net::training::run_train;
 
 // sigmoid "clamps" values (in a fairly scaled way) to 0..1
 // Training logic moved to `training.rs`
