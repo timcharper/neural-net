@@ -150,7 +150,7 @@ impl DrawingAreaUI {
     let data = self.surface.data().expect("Failed to get surface data");
 
     // Convert ARGB32 data to grayscale and downsample
-    let mut downsampled = Array2::<u8>::zeros((28, 28));
+    let mut downsampled = Array2::<f32>::zeros((28, 28));
 
     for i in 0..28 {
       for j in 0..28 {
@@ -180,13 +180,64 @@ impl DrawingAreaUI {
         }
 
         downsampled[[i, j]] = if count > 0 {
-          (sum / count as f32 * 255.0) as u8
+          //(sum / count as f32 * 255.0) as u8
+          sum / count as f32
         } else {
-          0
+          0.0
         };
       }
     }
 
-    downsampled
+      // Center by center of mass (MNIST preprocessing)
+    let mut com_row = 0.0;
+    let mut com_col = 0.0;
+    let mut total_mass = 0.0;
+
+    for i in 0..28 {
+      for j in 0..28 {
+        let mass = downsampled[[i, j]];
+        com_row += i as f32 * mass;
+        com_col += j as f32 * mass;
+        total_mass += mass;
+      }
+    }
+
+    if total_mass > 0.0 {
+      com_row /= total_mass;
+      com_col /= total_mass;
+
+      // Shift to center at (13.5, 13.5)
+      let shift_row = 13.5 - com_row;
+      let shift_col = 13.5 - com_col;
+
+      let mut centered = Array2::<f32>::zeros((28, 28));
+      for i in 0..28 {
+        for j in 0..28 {
+          let src_row = i as f32 - shift_row;
+          let src_col = j as f32 - shift_col;
+
+          // Bilinear interpolation
+          if src_row >= 0.0 && src_row < 27.0 && src_col >= 0.0 && src_col < 27.0 {
+            let r0 = src_row.floor() as usize;
+            let c0 = src_col.floor() as usize;
+            let r1 = (r0 + 1).min(27);
+            let c1 = (c0 + 1).min(27);
+
+            let dr = src_row - r0 as f32;
+            let dc = src_col - c0 as f32;
+
+            centered[[i, j]] =
+              downsampled[[r0, c0]] * (1.0 - dr) * (1.0 - dc) +
+              downsampled[[r0, c1]] * (1.0 - dr) * dc +
+              downsampled[[r1, c0]] * dr * (1.0 - dc) +
+              downsampled[[r1, c1]] * dr * dc;
+          }
+        }
+      }
+
+      centered.mapv(|v| (v * 255.0).min(255.0) as u8)
+    } else {
+      downsampled.mapv(|v| (v * 255.0) as u8)
+    }
   }
 }
